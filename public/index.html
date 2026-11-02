@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clinic Appointments</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --primary-soft: #e0f2fe;
+      --success: #16a34a;
+      --success-soft: #dcfce7;
+      --danger: #dc2626;
+      --danger-soft: #fee2e2;
+      --neutral-50: #f8fafc;
+      --neutral-100: #f1f5f9;
+      --neutral-200: #e2e8f0;
+      --neutral-300: #cbd5e1;
+      --neutral-500: #64748b;
+      --neutral-700: #334155;
+      --neutral-900: #0f172a;
+      --radius: 12px;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+      --shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.05);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: var(--neutral-50);
+      color: var(--neutral-900);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--neutral-200);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 20px;
+      color: var(--primary);
+      text-decoration: none;
+    }
+    .brand span { color: var(--neutral-700); }
+    nav {
+      display: flex;
+      gap: 8px;
+    }
+    nav button {
+      background: none;
+      border: 1px solid var(--neutral-200);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--neutral-700);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    nav button:hover { background: var(--neutral-100); }
+    nav button.active {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: var(--primary);
+    }
+    main {
+      max-width: 900px;
+      margin: 32px auto;
+      padding: 0 20px;
+    }
+    .view { display: none; }
+    .view.active { display: block; }
+    .card {
+      background: #ffffff;
+      border: 1px solid var(--neutral-200);
+      border-radius: var(--radius);
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 24px;
+    }
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: var(--neutral-500);
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    .filters {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .filter-item {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--neutral-700);
+    }
+    select, input[type="text"], input[type="email"] {
+      padding: 10px 14px;
+      border: 1px solid var(--neutral-300);
+      border-radius: 8px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    select:focus, input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-soft);
+    }
+    .slots-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    .slot-card {
+      border: 1px solid var(--neutral-200);
+      border-radius: 10px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .slot-card:hover {
+      border-color: var(--primary);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+    .slot-card.selected {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+      box-shadow: 0 0 0 2px var(--primary);
+    }
+    .slot-card.unavailable {
+      opacity: 0.55;
+      background: var(--neutral-100);
+      cursor: not-allowed;
+      border-color: var(--neutral-200);
+    }
+    .slot-card.unavailable:hover {
+      transform: none;
+      box-shadow: none;
+      border-color: var(--neutral-200);
+    }
+    .slot-provider {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--neutral-900);
+    }
+    .slot-time {
+      font-size: 13px;
+      color: var(--neutral-500);
+    }
+    .badge {
+      display: inline-block;
+      align-self: flex-start;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 20px;
+    }
+    .badge-available { background: var(--success-soft); color: var(--success); }
+    .badge-booked { background: var(--neutral-200); color: var(--neutral-700); }
+    .badge-cancelled { background: var(--danger-soft); color: var(--danger); }
+    .badge-confirmed { background: var(--success-soft); color: var(--success); }
+
+    .booking-box {
+      margin-top: 28px;
+      padding-top: 24px;
+      border-top: 1px solid var(--neutral-200);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .btn {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.2s;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+    }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-primary:disabled {
+      background: var(--neutral-300);
+      cursor: not-allowed;
+    }
+    .btn-danger {
+      background: var(--danger);
+      color: #ffffff;
+    }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-outline {
+      background: #ffffff;
+      border: 1px solid var(--neutral-300);
+      color: var(--neutral-700);
+    }
+    .btn-outline:hover { background: var(--neutral-100); }
+    .alert {
+      padding: 14px 18px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      display: none;
+    }
+    .alert.show { display: block; }
+    .alert-error {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border: 1px solid #fecaca;
+    }
+    .alert-success {
+      background: var(--success-soft);
+      color: var(--success);
+      border: 1px solid #bbf7d0;
+    }
+    .confirmation-view {
+      text-align: center;
+      padding: 40px 20px;
+    }
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      background: var(--success-soft);
+      color: var(--success);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      margin: 0 auto 20px;
+    }
+    .confirm-table {
+      margin: 24px auto;
+      max-width: 420px;
+      text-align: left;
+      border-collapse: collapse;
+      width: 100%;
+    }
+    .confirm-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--neutral-100);
+      font-size: 14px;
+    }
+    .confirm-table td:first-child {
+      font-weight: 600;
+      color: var(--neutral-500);
+      width: 40%;
+    }
+    .booking-list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border: 1px solid var(--neutral-200);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      background: #ffffff;
+    }
+    .empty-msg {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--neutral-500);
+      font-size: 14px;
+    }
+    .pagination-controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      margin-top: 24px;
+    }
+    @media (max-width: 640px) {
+      .form-row { grid-template-columns: 1fr; }
+      .booking-list-item { flex-direction: column; align-items: flex-start; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="#" class="brand">
+    <span>🩺</span> Clinic Booking
+  </a>
+  <nav>
+    <button id="nav-slots" class="active" onclick="showView('slots')">Available Slots</button>
+    <button id="nav-lookup" onclick="showView('lookup')">My Bookings</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ALERTS -->
+  <div id="alert-box" class="alert"></div>
+
+  <!-- VIEW: AVAILABLE SLOTS & BOOKING -->
+  <div id="view-slots" class="view active">
+    <div class="card">
+      <h2>Appointment Slots</h2>
+      <p class="subtitle">Select an available appointment slot with one of our doctors.</p>
+
+      <div class="filters">
+        <div class="filter-item">
+          <label for="provider-select">Doctor</label>
+          <select id="provider-select" onchange="loadSlots()">
+            <option value="">All Doctors</option>
+          </select>
+        </div>
+        <div class="filter-item" style="justify-content: flex-end;">
+          <button class="btn btn-outline" onclick="loadSlots()">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div id="slots-container" class="slots-grid"></div>
+
+      <!-- BOOKING FORM -->
+      <div id="booking-form-section" class="booking-box" style="display: none;">
+        <h2>Book Selected Slot</h2>
+        <p class="subtitle" id="selected-slot-desc"></p>
+
+        <form id="book-form" onsubmit="handleBookSlot(event)">
+          <div class="form-row">
+            <div class="filter-item">
+              <label for="patient-name">Full Name *</label>
+              <input type="text" id="patient-name" placeholder="Ada Obi" required>
+            </div>
+            <div class="filter-item">
+              <label for="patient-email">Email Address *</label>
+              <input type="email" id="patient-email" placeholder="ada@example.com" required>
+            </div>
+          </div>
+          <div style="display: flex; gap: 12px;">
+            <button type="submit" id="btn-submit-book" class="btn btn-primary">Confirm Booking</button>
+            <button type="button" class="btn btn-outline" onclick="deselectSlot()">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: CONFIRMATION -->
+  <div id="view-confirmation" class="view">
+    <div class="card confirmation-view">
+      <div class="success-icon">✓</div>
+      <h2>Appointment Confirmed!</h2>
+      <p class="subtitle">Your appointment has been booked. Keep your booking details handy.</p>
+
+      <table class="confirm-table">
+        <tr>
+          <td>Booking ID</td>
+          <td id="conf-id"></td>
+        </tr>
+        <tr>
+          <td>Patient Name</td>
+          <td id="conf-name"></td>
+        </tr>
+        <tr>
+          <td>Email</td>
+          <td id="conf-email"></td>
+        </tr>
+        <tr>
+          <td>Slot ID</td>
+          <td id="conf-slot-id"></td>
+        </tr>
+        <tr>
+          <td>Status</td>
+          <td><span class="badge badge-confirmed" id="conf-status">confirmed</span></td>
+        </tr>
+        <tr>
+          <td>Created At</td>
+          <td id="conf-created"></td>
+        </tr>
+      </table>
+
+      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 24px;">
+        <button class="btn btn-primary" onclick="showView('slots')">Book Another Slot</button>
+        <button class="btn btn-outline" onclick="openMyBookingsForEmail()">View My Bookings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- VIEW: LOOKUP BOOKINGS -->
+  <div id="view-lookup" class="view">
+    <div class="card">
+      <h2>My Bookings</h2>
+      <p class="subtitle">Enter your email address to look up and manage your appointments.</p>
+
+      <form onsubmit="handleLookup(event)" style="display: flex; gap: 12px; margin-bottom: 24px;">
+        <input type="email" id="lookup-email-input" placeholder="ada@example.com" required style="flex: 1;">
+        <button type="submit" class="btn btn-primary">Find Bookings</button>
+      </form>
+
+      <div id="bookings-list-container"></div>
+      <div id="pagination-box" class="pagination-controls" style="display: none;"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+  const API_KEY = 'clinic-api-key-2026';
+  let allSlots = [];
+  let selectedSlot = null;
+  let lastBookedEmail = '';
+  let cursorStack = [];
+  let currentCursor = null;
+
+  async function request(path, options = {}) {
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-API-Key': API_KEY,
+      ...(options.headers || {})
+    };
+
+    const res = await fetch(path, { ...options, headers });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || 'Request failed');
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+
+  function showAlert(message, type = 'error') {
+    const el = document.getElementById('alert-box');
+    el.className = `alert alert-${type} show`;
+    el.textContent = message;
+    setTimeout(() => { el.classList.remove('show'); }, 6000);
+  }
+
+  function showView(viewName) {
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+
+    const targetView = document.getElementById(`view-${viewName}`);
+    if (targetView) targetView.classList.add('active');
+
+    const navBtn = document.getElementById(`nav-${viewName}`);
+    if (navBtn) navBtn.classList.add('active');
+
+    if (viewName === 'slots') {
+      loadSlots();
+    }
+  }
+
+  function formatDateTime(isoString) {
+    if (!isoString) return '';
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZoneName: 'short'
+      });
+    } catch {
+      return isoString;
+    }
+  }
+
+  async function loadSlots() {
+    const container = document.getElementById('slots-container');
+    container.innerHTML = '<div class="empty-msg">Loading slots...</div>';
+
+    const provider = document.getElementById('provider-select').value;
+    const url = provider ? `/slots?provider=${encodeURIComponent(provider)}` : '/slots';
+
+    try {
+      const data = await request(url);
+      allSlots = data.slots || [];
+
+      // Update provider dropdown if needed
+      const select = document.getElementById('provider-select');
+      const currentVal = select.value;
+      const providers = Array.from(new Set(allSlots.map(s => s.provider)));
+      if (select.options.length <= 1) {
+        providers.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p;
+          opt.textContent = p;
+          select.appendChild(opt);
+        });
+      }
+
+      renderSlots();
+    } catch (err) {
+      container.innerHTML = '<div class="empty-msg">Failed to load slots.</div>';
+      showAlert(err.message, 'error');
+    }
+  }
+
+  function renderSlots() {
+    const container = document.getElementById('slots-container');
+    if (allSlots.length === 0) {
+      container.innerHTML = '<div class="empty-msg">No slots found.</div>';
+      return;
+    }
+
+    container.innerHTML = allSlots.map(s => {
+      const isSelected = selectedSlot && selectedSlot.id === s.id;
+      const classes = [
+        'slot-card',
+        s.available ? '' : 'unavailable',
+        isSelected ? 'selected' : ''
+      ].filter(Boolean).join(' ');
+
+      return `
+        <div class="${classes}" onclick="selectSlot('${s.id}')">
+          <div class="slot-provider">${escapeHtml(s.provider)}</div>
+          <div class="slot-time">${formatDateTime(s.start)}</div>
+          <div class="slot-time">to ${formatDateTime(s.end)}</div>
+          <span class="badge ${s.available ? 'badge-available' : 'badge-booked'}">
+            ${s.available ? 'Available' : 'Booked'}
+          </span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function selectSlot(slotId) {
+    const slot = allSlots.find(s => s.id === slotId);
+    if (!slot || !slot.available) return;
+
+    selectedSlot = slot;
+    renderSlots();
+
+    const desc = `${slot.provider} on ${formatDateTime(slot.start)}`;
+    document.getElementById('selected-slot-desc').textContent = desc;
+    document.getElementById('booking-form-section').style.display = 'block';
+    document.getElementById('booking-form-section').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function deselectSlot() {
+    selectedSlot = null;
+    renderSlots();
+    document.getElementById('booking-form-section').style.display = 'none';
+  }
+
+  async function handleBookSlot(e) {
+    e.preventDefault();
+    if (!selectedSlot) return;
+
+    const name = document.getElementById('patient-name').value.trim();
+    const email = document.getElementById('patient-email').value.trim();
+    const btn = document.getElementById('btn-submit-book');
+
+    btn.disabled = true;
+    btn.textContent = 'Booking...';
+
+    // Generate a client idempotency key
+    const idempotencyKey = `idemp-${selectedSlot.id}-${email.toLowerCase()}-${Date.now()}`;
+
+    try {
+      const booking = await request('/bookings', {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({
+          slot_id: selectedSlot.id,
+          name,
+          email
+        })
+      });
+
+      lastBookedEmail = booking.email;
+
+      // Populate confirmation
+      document.getElementById('conf-id').textContent = booking.id;
+      document.getElementById('conf-name').textContent = booking.name;
+      document.getElementById('conf-email').textContent = booking.email;
+      document.getElementById('conf-slot-id').textContent = booking.slot_id;
+      document.getElementById('conf-status').textContent = booking.status;
+      document.getElementById('conf-created').textContent = formatDateTime(booking.created_at);
+
+      deselectSlot();
+      document.getElementById('book-form').reset();
+      showView('confirmation');
+    } catch (err) {
+      showAlert(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Confirm Booking';
+    }
+  }
+
+  function openMyBookingsForEmail() {
+    if (lastBookedEmail) {
+      document.getElementById('lookup-email-input').value = lastBookedEmail;
+    }
+    showView('lookup');
+    if (lastBookedEmail) {
+      fetchBookingsPage(lastBookedEmail, null);
+    }
+  }
+
+  function handleLookup(e) {
+    e.preventDefault();
+    const email = document.getElementById('lookup-email-input').value.trim();
+    if (!email) return;
+    cursorStack = [];
+    currentCursor = null;
+    fetchBookingsPage(email, null);
+  }
+
+  async function fetchBookingsPage(email, cursor) {
+    const container = document.getElementById('bookings-list-container');
+    container.innerHTML = '<div class="empty-msg">Fetching bookings...</div>';
+
+    let url = `/bookings?email=${encodeURIComponent(email)}&limit=5`;
+    if (cursor) {
+      url += `&cursor=${encodeURIComponent(cursor)}`;
+    }
+
+    try {
+      const data = await request(url);
+      const bookings = data.bookings || [];
+
+      if (bookings.length === 0) {
+        container.innerHTML = '<div class="empty-msg">No bookings found for this email.</div>';
+        document.getElementById('pagination-box').style.display = 'none';
+        return;
+      }
+
+      container.innerHTML = bookings.map(b => `
+        <div class="booking-list-item">
+          <div>
+            <div style="font-weight: 600; font-size: 15px;">${escapeHtml(b.name)} · Slot: ${escapeHtml(b.slot_id)}</div>
+            <div style="color: var(--neutral-500); font-size: 13px;">Created: ${formatDateTime(b.created_at)}</div>
+            <div style="margin-top: 6px;">
+              <span class="badge ${b.status === 'confirmed' ? 'badge-confirmed' : 'badge-cancelled'}">
+                ${b.status}
+              </span>
+            </div>
+          </div>
+          <div>
+            ${b.status === 'confirmed' ? `
+              <button class="btn btn-danger" onclick="cancelBooking('${b.id}')">Cancel Booking</button>
+            ` : '<span style="color: var(--neutral-500); font-size: 13px;">Cancelled</span>'}
+          </div>
+        </div>
+      `).join('');
+
+      renderPagination(email, data.next_cursor);
+    } catch (err) {
+      container.innerHTML = '<div class="empty-msg">Failed to load bookings.</div>';
+      showAlert(err.message, 'error');
+    }
+  }
+
+  function renderPagination(email, nextCursor) {
+    const box = document.getElementById('pagination-box');
+    const hasNext = Boolean(nextCursor);
+    const hasPrev = cursorStack.length > 0;
+
+    if (!hasNext && !hasPrev) {
+      box.style.display = 'none';
+      return;
+    }
+
+    box.style.display = 'flex';
+    box.innerHTML = `
+      <button class="btn btn-outline" ${!hasPrev ? 'disabled' : ''} onclick="prevPage('${escapeHtml(email)}')">← Previous</button>
+      <button class="btn btn-outline" ${!hasNext ? 'disabled' : ''} onclick="nextPage('${escapeHtml(email)}', '${nextCursor}')">Next →</button>
+    `;
+  }
+
+  function nextPage(email, nextCursor) {
+    cursorStack.push(currentCursor);
+    currentCursor = nextCursor;
+    fetchBookingsPage(email, nextCursor);
+  }
+
+  function prevPage(email) {
+    if (cursorStack.length === 0) return;
+    const prevCursor = cursorStack.pop();
+    currentCursor = prevCursor;
+    fetchBookingsPage(email, prevCursor);
+  }
+
+  async function cancelBooking(id) {
+    if (!confirm('Are you sure you want to cancel this booking?')) return;
+    try {
+      await request(`/bookings/${id}`, { method: 'DELETE' });
+      showAlert('Booking successfully cancelled.', 'success');
+      const email = document.getElementById('lookup-email-input').value.trim();
+      fetchBookingsPage(email, currentCursor);
+      // Also reload slots
+      loadSlots();
+    } catch (err) {
+      showAlert(err.message, 'error');
+    }
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // Initial load
+  loadSlots();
+</script>
+</body>
+</html>
