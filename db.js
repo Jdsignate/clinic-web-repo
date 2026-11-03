@@ -1,82 +1,152 @@
-const initSqlJs = require('sql.js');
+const { Pool } = require('pg');
+const initSqlJs = require('sql.js/dist/sql-wasm-inline.js');
 const fs = require('fs');
 const path = require('path');
 
-// In Vercel serverless functions, only /tmp is writable
-const isVercel = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME || Boolean(process.env.LAMBDA_TASK_ROOT);
-const SEED_DB_PATH = path.join(__dirname, 'clinic.db');
-const DB_PATH = isVercel ? path.join('/tmp', 'clinic.db') : SEED_DB_PATH;
+const DATABASE_URL = process.env.DATABASE_URL;
+const isPostgres = Boolean(DATABASE_URL);
 
-let db = null;
+let pgPool = null;
+let sqliteDb = null;
+let initialized = false;
 
-async function initDatabase() {
-  if (db) return db;
-
-  const SQL = await initSqlJs();
-
-  // On Vercel, if /tmp/clinic.db doesn't exist yet but bundled clinic.db exists, copy it
-  if (isVercel && !fs.existsSync(DB_PATH) && fs.existsSync(SEED_DB_PATH)) {
-    try {
-      fs.copyFileSync(SEED_DB_PATH, DB_PATH);
-    } catch (e) {
-      console.warn('Could not copy bundled clinic.db to /tmp:', e.message);
-    }
-  }
-
-  if (fs.existsSync(DB_PATH)) {
-    try {
-      const buffer = fs.readFileSync(DB_PATH);
-      db = new SQL.Database(buffer);
-    } catch (e) {
-      console.warn('Could not read existing clinic.db, creating fresh database:', e.message);
-      db = new SQL.Database();
-    }
-  } else {
-    db = new SQL.Database();
-  }
-
-  db.run('PRAGMA foreign_keys = ON');
-
-  // Create tables according to OpenAPI spec
-  db.run(`
-    CREATE TABLE IF NOT EXISTS slots (
-      id TEXT PRIMARY KEY,
-      provider TEXT NOT NULL,
-      start TEXT NOT NULL,
-      end TEXT NOT NULL
-    );
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS bookings (
-      id TEXT PRIMARY KEY,
-      slot_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      idempotency_key TEXT UNIQUE,
-      idempotency_body TEXT,
-      FOREIGN KEY (slot_id) REFERENCES slots(id)
-    );
-  `);
-
-  // Index for fast lookups
-  db.run(`CREATE INDEX IF NOT EXISTS idx_bookings_email ON bookings(email);`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_bookings_slot ON bookings(slot_id, status);`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_slots_start ON slots(start);`);
-
-  // Seed default slots if none exist
-  const countRes = queryOne('SELECT COUNT(*) AS count FROM slots');
-  if (!countRes || countRes.count === 0) {
-    seedDefaultSlots();
-  }
-
-  saveDatabase();
-  return db;
+// Convert '?' placeholders to '$1, $2, ...' for Postgres
+function toPgSql(sql) {
+  let idx = 1;
+  return sql.replace(/\?/g, () => `$${idx++}`);
 }
 
-function seedDefaultSlots() {
+async function initDatabase() {
+  if (initialized) return;
+
+  if (isPostgres) {
+    // ═══════════════════════════════════════════════════════════════
+    // SUPABASE / POSTGRESQL INITIALIZATION
+    // ═══════════════════════════════════════════════════════════════
+    console.log('Connecting to PostgreSQL / Supabase...');
+    pgPool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+
+    // Test connection
+    const client = await pgPool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS slots (
+          id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL,
+          start TEXT NOT NULL,
+          "end" TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS bookings (
+          id TEXT PRIMARY KEY,
+          slot_id TEXT NOT NULL REFERENCES slots(id),
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          idempotency_key TEXT UNIQUE,
+          idempotency_body TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_bookings_email ON bookings(email);
+        CREATE INDEX IF NOT EXISTS idx_bookings_slot ON bookings(slot_id, status);
+        CREATE INDEX IF NOT EXISTS idx_slots_start ON slots(start);
+
+        -- Partial unique index guarantees Level 3 concurrency at DB level
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_one_confirmed_booking_per_slot
+        ON bookings (slot_id) WHERE status = 'confirmed';
+      `);
+
+      const countRes = await client.query('SELECT COUNT(*) AS count FROM slots');
+      const count = parseInt(countRes.rows[0].count, 10);
+      if (count === 0) {
+        console.log('Seeding initial slots in Supabase...');
+        await seedDefaultSlotsPg(client);
+      }
+    } finally {
+      client.release();
+    }
+    console.log('PostgreSQL / Supabase initialized successfully.');
+  } else {
+    // ═══════════════════════════════════════════════════════════════
+    // LOCAL SQLITE INITIALIZATION (FALLBACK)
+    // ═══════════════════════════════════════════════════════════════
+    console.log('Using SQLite fallback for local development...');
+    const isVercel = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const SEED_DB_PATH = path.join(__dirname, 'clinic.db');
+    const DB_PATH = isVercel ? path.join('/tmp', 'clinic.db') : SEED_DB_PATH;
+
+    const SQL = await initSqlJs();
+
+    if (isVercel && !fs.existsSync(DB_PATH) && fs.existsSync(SEED_DB_PATH)) {
+      try {
+        fs.copyFileSync(SEED_DB_PATH, DB_PATH);
+      } catch (e) {
+        console.warn('Could not copy bundled clinic.db to /tmp:', e.message);
+      }
+    }
+
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        const buffer = fs.readFileSync(DB_PATH);
+        sqliteDb = new SQL.Database(buffer);
+      } catch (e) {
+        sqliteDb = new SQL.Database();
+      }
+    } else {
+      sqliteDb = new SQL.Database();
+    }
+
+    sqliteDb.run('PRAGMA foreign_keys = ON');
+
+    sqliteDb.run(`
+      CREATE TABLE IF NOT EXISTS slots (
+        id TEXT PRIMARY KEY,
+        provider TEXT NOT NULL,
+        start TEXT NOT NULL,
+        "end" TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS bookings (
+        id TEXT PRIMARY KEY,
+        slot_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        idempotency_key TEXT UNIQUE,
+        idempotency_body TEXT,
+        FOREIGN KEY (slot_id) REFERENCES slots(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_bookings_email ON bookings(email);
+      CREATE INDEX IF NOT EXISTS idx_bookings_slot ON bookings(slot_id, status);
+      CREATE INDEX IF NOT EXISTS idx_slots_start ON slots(start);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_one_confirmed_booking_per_slot
+      ON bookings (slot_id) WHERE status = 'confirmed';
+    `);
+
+    const countRes = queryOneSqlite('SELECT COUNT(*) AS count FROM slots');
+    if (!countRes || countRes.count === 0) {
+      seedDefaultSlotsSqlite();
+    }
+
+    saveDatabase();
+  }
+
+  initialized = true;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// SEED HELPERS
+// ═════════════════════════════════════════════════════════════════
+function getDefaultSlotsData() {
   const providers = ['Dr Ade', 'Dr Smith', 'Dr Patel'];
   const times = [
     { start: '09:00', end: '09:30' },
@@ -89,6 +159,7 @@ function seedDefaultSlots() {
     { start: '15:00', end: '15:30' }
   ];
 
+  const slots = [];
   const now = new Date();
   let slotIndex = 1;
 
@@ -99,37 +170,70 @@ function seedDefaultSlots() {
 
     for (const provider of providers) {
       for (const t of times) {
-        const slotId = `s${slotIndex++}`;
-        const startIso = `${dateStr}T${t.start}:00Z`;
-        const endIso = `${dateStr}T${t.end}:00Z`;
-        execSql(
-          'INSERT INTO slots (id, provider, start, end) VALUES (?, ?, ?, ?)',
-          [slotId, provider, startIso, endIso]
-        );
+        slots.push({
+          id: `s${slotIndex++}`,
+          provider,
+          start: `${dateStr}T${t.start}:00Z`,
+          end: `${dateStr}T${t.end}:00Z`
+        });
       }
     }
   }
+  return slots;
 }
 
-function saveDatabase() {
-  if (db) {
-    try {
-      const data = db.export();
-      const buffer = Buffer.from(data);
-      fs.writeFileSync(DB_PATH, buffer);
-    } catch (e) {
-      console.error('Failed to persist database to disk:', e);
-    }
+async function seedDefaultSlotsPg(client) {
+  const slots = getDefaultSlotsData();
+  for (const s of slots) {
+    await client.query(
+      'INSERT INTO slots (id, provider, start, "end") VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [s.id, s.provider, s.start, s.end]
+    );
   }
 }
 
-function getDb() {
-  return db;
+function seedDefaultSlotsSqlite() {
+  const slots = getDefaultSlotsData();
+  const stmt = sqliteDb.prepare('INSERT INTO slots (id, provider, start, "end") VALUES (?, ?, ?, ?)');
+  for (const s of slots) {
+    stmt.bind([s.id, s.provider, s.start, s.end]);
+    stmt.step();
+    stmt.reset();
+  }
+  stmt.free();
 }
 
-function queryAll(sql, params = []) {
-  if (!db) return [];
-  const stmt = db.prepare(sql);
+// ═════════════════════════════════════════════════════════════════
+// QUERY METHODS (ASYNC FOR BOTH POSTGRES & SQLITE)
+// ═════════════════════════════════════════════════════════════════
+async function queryAll(sql, params = []) {
+  if (isPostgres) {
+    const pgSql = toPgSql(sql);
+    const res = await pgPool.query(pgSql, params);
+    return res.rows;
+  } else {
+    return queryAllSqlite(sql, params);
+  }
+}
+
+async function queryOne(sql, params = []) {
+  const rows = await queryAll(sql, params);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+async function execSql(sql, params = []) {
+  if (isPostgres) {
+    const pgSql = toPgSql(sql);
+    return await pgPool.query(pgSql, params);
+  } else {
+    execSqlSqlite(sql, params);
+  }
+}
+
+// SQLite internal helpers
+function queryAllSqlite(sql, params = []) {
+  if (!sqliteDb) return [];
+  const stmt = sqliteDb.prepare(sql);
   if (params && params.length) stmt.bind(params);
   const rows = [];
   while (stmt.step()) {
@@ -139,29 +243,41 @@ function queryAll(sql, params = []) {
   return rows;
 }
 
-function queryOne(sql, params = []) {
-  const rows = queryAll(sql, params);
+function queryOneSqlite(sql, params = []) {
+  const rows = queryAllSqlite(sql, params);
   return rows.length > 0 ? rows[0] : null;
 }
 
-function execSql(sql, params = []) {
-  if (!db) return;
+function execSqlSqlite(sql, params = []) {
+  if (!sqliteDb) return;
   if (params && params.length) {
-    const stmt = db.prepare(sql);
+    const stmt = sqliteDb.prepare(sql);
     stmt.bind(params);
     stmt.step();
     stmt.free();
   } else {
-    db.run(sql);
+    sqliteDb.run(sql);
+  }
+}
+
+function saveDatabase() {
+  if (!isPostgres && sqliteDb) {
+    try {
+      const isVercel = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME;
+      const DB_PATH = isVercel ? path.join('/tmp', 'clinic.db') : path.join(__dirname, 'clinic.db');
+      const data = sqliteDb.export();
+      fs.writeFileSync(DB_PATH, Buffer.from(data));
+    } catch (e) {
+      // Ignored in read-only environments
+    }
   }
 }
 
 module.exports = {
   initDatabase,
-  getDb,
   queryAll,
   queryOne,
   execSql,
   saveDatabase,
-  seedDefaultSlots
+  isPostgres: () => isPostgres,
 };

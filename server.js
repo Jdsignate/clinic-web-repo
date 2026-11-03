@@ -34,6 +34,10 @@ app.use(async (req, res, next) => {
 // 4. Serve static web frontend
 app.use(express.static(path.join(__dirname, 'public')));
 
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // 5. OpenAPI JSON
 app.get('/assessment-api/openapi.json', (req, res) => {
   res.sendFile(path.join(__dirname, 'openapi.json'));
